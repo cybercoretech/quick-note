@@ -1,0 +1,347 @@
+import QtQuick
+import QtQuick.Controls
+import Quickshell
+import Quickshell.Io
+
+FloatingWindow {
+    id: root
+    title: "quick-note"
+    implicitWidth: 900
+    implicitHeight: 700
+    // Start shown so the first Super+Alt+N launch is visible; later presses toggle.
+    visible: true
+
+    property bool previewMode: false
+    property bool noteLoaded: false
+    property string saveStatus: "LOADING"
+    property bool closeWhenSaved: false
+
+    // FileView.setText() does not emit onSaved when content is unchanged, so a
+    // close that only waits on that signal gets stuck with visible:true forever.
+    // Further toggles keep taking the "close" path and appear to do nothing.
+    function requestClose() {
+        saveTimer.stop()
+        closeFallbackTimer.stop()
+
+        if (!root.noteLoaded) {
+            root.visible = false
+            return
+        }
+
+        const nextText = editor.text
+        if (nextText === noteFile.text()) {
+            root.saveStatus = "SAVED"
+            root.closeWhenSaved = false
+            root.visible = false
+            return
+        }
+
+        root.closeWhenSaved = true
+        root.saveStatus = "SAVING"
+        noteFile.setText(nextText)
+        closeFallbackTimer.start()
+    }
+
+    function showNote() {
+        closeFallbackTimer.stop()
+        root.closeWhenSaved = false
+        root.visible = true
+    }
+
+    onClosed: {
+        // Compositor-initiated close (e.g. hyprland kill) must clear QML state,
+        // otherwise toggle keeps trying to "close" a window that is already gone.
+        closeFallbackTimer.stop()
+        root.closeWhenSaved = false
+        root.visible = false
+    }
+
+    IpcHandler {
+        target: "quick-note"
+
+        function toggle() {
+            if (root.visible)
+                root.requestClose()
+            else
+                root.showNote()
+        }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.WindowShortcut
+        onActivated: root.requestClose()
+    }
+
+    Timer {
+        id: closeFallbackTimer
+        interval: 750
+        repeat: false
+        onTriggered: {
+            if (root.closeWhenSaved) {
+                root.closeWhenSaved = false
+                root.visible = false
+            }
+        }
+    }
+
+    color: "transparent"
+
+    FileView {
+        id: noteFile
+        path: "/home/raven/.local/share/quick-note/scratch.md"
+        blockLoading: true
+
+        onLoaded: {
+            editor.text = text()
+            root.noteLoaded = true
+            root.saveStatus = "SAVED"
+        }
+
+        onSaved: {
+            root.saveStatus = "SAVED"
+            if (root.closeWhenSaved) {
+                closeFallbackTimer.stop()
+                root.closeWhenSaved = false
+                root.visible = false
+            }
+        }
+
+        onSaveFailed: error => {
+            root.saveStatus = "SAVE FAILED"
+            closeFallbackTimer.stop()
+            root.closeWhenSaved = false
+            root.visible = false
+            console.warn("Quick-Note: could not save notes:", error)
+        }
+
+        onLoadFailed: error => {
+            root.saveStatus = "LOAD FAILED"
+            console.warn("Quick-Note: could not load notes:", error)
+        }
+    }
+
+    Timer {
+        id: saveTimer
+        interval: 450
+        repeat: false
+
+        onTriggered: {
+            if (root.noteLoaded) {
+                root.saveStatus = "SAVING"
+                noteFile.setText(editor.text)
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#99000000"
+
+        Rectangle {
+            id: panel
+
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 48, 820)
+            height: Math.min(parent.height - 48, 620)
+            radius: 12
+            color: "#17181D"
+            border.color: "#41414F"
+            border.width: 1
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 22
+                spacing: 14
+
+                Row {
+                    width: parent.width
+                    spacing: 10
+
+                    Rectangle {
+                        width: 9
+                        height: 9
+                        radius: 5
+                        color: "#A855F7"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: "quick-note"
+                        color: "#F3F0FA"
+                        font.family: "monospace"
+                        font.pixelSize: 19
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "/ main"
+                        color: "#C084FC"
+                        font.family: "monospace"
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Item {
+                        width: 1
+                        height: 1
+                    }
+
+                    Button {
+                        text: "CLOSE"
+                        onClicked: root.requestClose()
+
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#C084FC"
+                            font.family: "monospace"
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        background: Rectangle {
+                            color: "#272830"
+                            border.color: "#65408A"
+                            radius: 5
+                        }
+                    }
+
+                    Button {
+                        text: root.previewMode ? "WRITE" : "PREVIEW"
+                        onClicked: root.previewMode = !root.previewMode
+
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#22D3EE"
+                            font.family: "monospace"
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        background: Rectangle {
+                            color: "#272830"
+                            border.color: "#65408A"
+                            radius: 5
+                        }
+                    }
+
+                    Text {
+                        text: root.saveStatus
+                        color: root.saveStatus === "SAVED"
+                               ? "#22D3EE" : "#C084FC"
+                        font.family: "monospace"
+                        font.pixelSize: 11
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: "#383944"
+                }
+
+                Text {
+                    text: "~/notes/scratch.md"
+                    color: "#22D3EE"
+                    font.family: "monospace"
+                    font.pixelSize: 12
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: Math.max(100, parent.height - 92)
+                    radius: 8
+                    color: "#202127"
+                    border.color: "#383944"
+                    border.width: 1
+
+                    TextEdit {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        visible: root.previewMode
+                        readOnly: true
+                        text: editor.text
+                        textFormat: TextEdit.MarkdownText
+                        color: "#E5E7EB"
+                        selectionColor: "#65408A"
+                        selectedTextColor: "#FFFFFF"
+                        font.family: "monospace"
+                        font.pixelSize: 14
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                    }
+
+                    TextArea {
+                        id: editor
+                        focus: !root.previewMode
+
+                        anchors.fill: parent
+                        anchors.margins: 14
+
+                        color: "#E5E7EB"
+                        selectionColor: "#65408A"
+                        selectedTextColor: "#FFFFFF"
+                        placeholderText: "# Quick notes\n\nType anything here..."
+                        placeholderTextColor: "#777987"
+
+                        font.family: "monospace"
+                        font.pixelSize: 14
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        persistentSelection: true
+
+                        background: Rectangle {
+                            color: "transparent"
+                        }
+
+                        enabled: root.noteLoaded
+
+                        onTextChanged: {
+                            if (root.noteLoaded) {
+                                root.saveStatus = "UNSAVED"
+                                saveTimer.restart()
+                            }
+                        }
+                    }
+                }
+
+                Row {
+                    width: parent.width
+                    spacing: 8
+
+                    Rectangle {
+                        width: 7
+                        height: 7
+                        radius: 4
+                        color: "#22D3EE"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                        text: "LOCAL MARKDOWN"
+                        color: "#22D3EE"
+                        font.family: "monospace"
+                        font.pixelSize: 10
+                    }
+
+                    Text {
+                        text: "/"
+                        color: "#555661"
+                        font.family: "monospace"
+                        font.pixelSize: 10
+                    }
+
+                    Text {
+                        text: "AUTOSAVE"
+                        color: "#C084FC"
+                        font.family: "monospace"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+    }
+}

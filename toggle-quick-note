@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -u
+
+CONFIG="$HOME/Devspace/Cybercore/tooling/quick-note/shell.qml"
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/quick-note"
+LOG_FILE="$LOG_DIR/toggle.log"
+
+mkdir -p "$LOG_DIR" || exit 1
+
+ipc() {
+    quickshell ipc --path "$CONFIG" "$@"
+}
+
+has_target() {
+    local output
+    output="$(ipc show 2>&1)" || true
+    [[ "$output" != *"No running instances for"* ]] || return 1
+    printf '%s\n' "$output" |
+        grep -Eq '(^|[^[:alnum:]_-])quick-note([^[:alnum:]_-]|$)'
+}
+
+# Existing instance: toggle it.
+if has_target; then
+    ipc call quick-note toggle >>"$LOG_FILE" 2>&1
+    exit $?
+fi
+
+# New instance: launch it and DO NOT toggle it after startup.
+nohup quickshell --no-duplicate --path "$CONFIG" \
+    >>"$LOG_FILE" 2>&1 </dev/null &
+
+# Wait for the new instance's IPC target, then leave it visible.
+for _ in $(seq 1 40); do
+    if has_target; then
+        printf '%s Quick-Note started; left initial visibility unchanged.\n' \
+            "$(date -Is)" >>"$LOG_FILE"
+        exit 0
+    fi
+    sleep 0.1
+done
+
+printf '%s Timed out waiting for Quick-Note IPC.\n' \
+    "$(date -Is)" >>"$LOG_FILE"
+exit 1
