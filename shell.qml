@@ -476,14 +476,12 @@ PanelWindow {
                         visible: !root.previewMode && root.showLineNumbers
                         anchors.left: parent.left
                         anchors.top: parent.top
-                        anchors.topMargin: 14
+                        anchors.topMargin: editor.topPadding + 14
                         anchors.leftMargin: 14
                         width: 35
                         color: "#555661"
-                        font.family: "monospace"
-                        font.pixelSize: 14
+                        font: editor.font
                         horizontalAlignment: Text.AlignRight
-                        lineHeight: editor.lineHeight
                         text: {
                             let count = editor.text.split('\n').length;
                             let res = "";
